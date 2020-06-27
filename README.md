@@ -13,7 +13,7 @@ dpkg -i [BUILDED_PACKAGE_NAME].deb
 apt remove rpi-camera-stream
 ```
 
-## START
+## Enable service
 ```
-rpi-camera-stream start
+systemctl enable rpi-camera-stream.service
 ```

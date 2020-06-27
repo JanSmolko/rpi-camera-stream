@@ -6,6 +6,8 @@ import io
 import picamera
 import logging
 import socketserver
+import configparser
+import os
 from threading import Condition
 from http import server
 
@@ -87,7 +89,11 @@ with picamera.PiCamera(resolution='640x480', framerate=24) as camera:
     #camera.rotation = 90
     camera.start_recording(output, format='mjpeg')
     try:
-        address = ('', 8000)
+        __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+        config = configparser.ConfigParser()
+        config.read(__location__ + '/config.ini')
+        port = config['DEFAULT'].getint('Port')
+        address = ('', port)
         server = StreamingServer(address, StreamingHandler)
         server.serve_forever()
     finally:
