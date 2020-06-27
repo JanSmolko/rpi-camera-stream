@@ -1,0 +1,6 @@
+Package: rpi-camera-stream
+Version: 0.1
+Architecture: all
+Maintainer: jan.smolko
+Depends: bash, python3
+Description: RPI camera stream.

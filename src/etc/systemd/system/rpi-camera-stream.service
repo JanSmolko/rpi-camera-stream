@@ -1,0 +1,13 @@
+[Unit]
+Description=RPI camera stream
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStart=/usr/bin/env python3 /etc/rpi-camera-stream/camera.py
+
+[Install]
+WantedBy=multi-user.target

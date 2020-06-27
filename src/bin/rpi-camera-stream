@@ -1,0 +1,3 @@
+#!/bin/sh
+#vcgencmd get_camera
+python3 /etc/rpi-camera-stream/camera.py
