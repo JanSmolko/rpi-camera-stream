@@ -8,6 +8,9 @@ import logging
 import socketserver
 import configparser
 import os
+import time
+import math
+import syslog
 from threading import Condition
 from http import server
 
@@ -23,11 +26,24 @@ PAGE="""\
 </html>
 """
 
+__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+config = configparser.ConfigParser()
+config.read(__location__ + '/config.ini')
+
 class StreamingOutput(object):
     def __init__(self):
         self.frame = None
+        self.frame_num = 0
         self.buffer = io.BytesIO()
         self.condition = Condition()
+        self.starttime = time.time()
+        if (config['DEFAULT'].getint('TimelapseTime') > 0 and config['DEFAULT']['TimelapsePath']):
+            try:
+                os.mkdir("%s/%s" % (config['DEFAULT']['TimelapsePath'], self.starttime))
+                self.output = None
+                self.timelapse_time = config['DEFAULT'].getint('TimelapseTime')
+            except Exception as err:
+                syslog.syslog(syslog.LOG_ERR, 'Error in timelapse init: %s' % err)
 
     def write(self, buf):
         if buf.startswith(b'\xff\xd8'):
@@ -38,6 +54,17 @@ class StreamingOutput(object):
                 self.frame = self.buffer.getvalue()
                 self.condition.notify_all()
             self.buffer.seek(0)
+
+            # save image every x seconds
+            if (self.timelapse_time > 0):
+                if self.output:
+                    self.output.close()
+
+                if (math.floor((time.time() - self.starttime) / self.timelapse_time) > self.frame_num):
+                    self.frame_num += 1
+                    self.output = io.open('./%s/image%02d.jpg' % (self.starttime, self.frame_num), 'wb')
+                    self.output.write(buf)
+
         return self.buffer.write(buf)
 
 class StreamingHandler(server.BaseHTTPRequestHandler):
@@ -87,14 +114,18 @@ with picamera.PiCamera(resolution='640x480', framerate=24) as camera:
     output = StreamingOutput()
     #Uncomment the next line to change your Pi's Camera rotation (in degrees)
     #camera.rotation = 90
+    time.sleep(2)
+    camera.iso = 800
+    camera.shutter_speed = camera.exposure_speed
+    camera.exposure_mode = 'off'
+    camera.awb_mode = 'fluorescent'
     camera.start_recording(output, format='mjpeg')
     try:
-        __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
-        config = configparser.ConfigParser()
-        config.read(__location__ + '/config.ini')
         port = config['DEFAULT'].getint('Port')
         address = ('', port)
         server = StreamingServer(address, StreamingHandler)
         server.serve_forever()
+    except Exception as err:
+        syslog.syslog(syslog.LOG_ERR, 'Error in server creation: %s' % err)
     finally:
         camera.stop_recording()
