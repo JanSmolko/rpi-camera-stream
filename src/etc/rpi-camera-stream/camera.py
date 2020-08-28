@@ -21,14 +21,51 @@ PAGE="""\
 </head>
 <body>
 <center><h1>Raspberry Pi - Surveillance Camera</h1></center>
-<center><img src="stream.mjpg" width="640" height="480"></center>
+<center><img src="stream.mjpg" style="max-width: 100%; max-height: 100%;" /></center>
 </body>
 </html>
 """
 
-__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
-config = configparser.ConfigParser()
-config.read(__location__ + '/config.ini')
+def isint(value):
+    try:
+        int(value)
+        return True
+    except ValueError:
+        return False
+
+def isfloat(value):
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
+
+class Config():
+    def __init__(self):
+        __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+        config = configparser.ConfigParser()
+        config.read(__location__ + '/config.ini')
+
+        # Server
+        self.server = config._sections['SERVER']
+        self.server['port'] = int(self.server['port']) or 8000
+
+        # Timelapse
+        self.timelapse = config._sections['TIMELAPSE']
+        self.timelapse['interval'] = int(self.timelapse['interval']) or 0
+        self.timelapse['path'] = self.timelapse['path'] or '/'
+
+        # Camera
+        self.camera = config._sections['CAMERA']
+        for c in self.camera:
+            if isint(self.camera[c]):
+                self.camera[c] = int(self.camera[c])
+                continue
+            if isfloat(self.camera[c]):
+                self.camera[c] = float(self.camera[c])
+                continue
+
+config = Config()
 
 class StreamingOutput(object):
     def __init__(self):
@@ -37,11 +74,12 @@ class StreamingOutput(object):
         self.buffer = io.BytesIO()
         self.condition = Condition()
         self.starttime = time.time()
-        if (config['DEFAULT'].getint('TimelapseTime') > 0 and config['DEFAULT']['TimelapsePath']):
+        self.timelapse_interval = config.timelapse['interval']
+        self.output = None
+
+        if (self.timelapse_interval > 0 and config.timelapse['path']):
             try:
-                os.mkdir("%s/%s" % (config['DEFAULT']['TimelapsePath'], self.starttime))
-                self.output = None
-                self.timelapse_time = config['DEFAULT'].getint('TimelapseTime')
+                os.mkdir("%s/%s" % (config.timelapse['path'], self.starttime))
             except Exception as err:
                 syslog.syslog(syslog.LOG_ERR, 'Error in timelapse init: %s' % err)
 
@@ -56,13 +94,13 @@ class StreamingOutput(object):
             self.buffer.seek(0)
 
             # save image every x seconds
-            if (self.timelapse_time > 0):
+            if (self.timelapse_interval > 0):
                 if self.output:
                     self.output.close()
 
-                if (math.floor((time.time() - self.starttime) / self.timelapse_time) > self.frame_num):
+                if (math.floor((time.time() - self.starttime) / self.timelapse_interval) > self.frame_num):
                     self.frame_num += 1
-                    self.output = io.open('./%s/image%02d.jpg' % (self.starttime, self.frame_num), 'wb')
+                    self.output = io.open('%s/%s/image%02d.jpg' % (config.timelapse.path, self.starttime, self.frame_num), 'wb')
                     self.output.write(buf)
 
         return self.buffer.write(buf)
@@ -110,18 +148,14 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-with picamera.PiCamera(resolution='640x480', framerate=24) as camera:
+with picamera.PiCamera() as camera:
     output = StreamingOutput()
-    #Uncomment the next line to change your Pi's Camera rotation (in degrees)
-    #camera.rotation = 90
-    time.sleep(2)
-    camera.iso = 800
-    camera.shutter_speed = camera.exposure_speed
-    camera.exposure_mode = 'off'
-    camera.awb_mode = 'fluorescent'
+    for c in config.camera:
+        setattr(camera, c, config.camera[c])
+
     camera.start_recording(output, format='mjpeg')
     try:
-        port = config['DEFAULT'].getint('Port')
+        port = config.server['port']
         address = ('', port)
         server = StreamingServer(address, StreamingHandler)
         server.serve_forever()
